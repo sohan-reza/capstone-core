@@ -16,19 +16,15 @@ help:
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 ## run: Build and run the application locally
-run: swagger
+run: 
 	@echo "Starting application on port $(APP_PORT)..."
 	@go run cmd/api/main.go
 
 ## build: Build the application binary
-build: swagger
+build: 
 	@echo "Building application binary..."
 	@go build -o bin/$(APP_NAME) cmd/api/main.go
 
-## swagger: Generate Swagger documentation
-swagger:
-	@echo "Generating Swagger documentation..."
-	@swag init -g cmd/api/main.go --output api/docs
 
 ## test: Run all tests
 test:
