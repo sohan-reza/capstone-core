@@ -8,8 +8,7 @@ import (
 type FileResponse struct {
 	Status   string                 `json:"status"`
 	Message  string                 `json:"message,omitempty"`
-	OldName  string                 `json:"old_filename"`
-	NewName  string                 `json:"new_filename"`
+	FileName string                 `json:"file_filename"`
 	FileSize int64                  `json:"file_size"`
 	FileType string                 `json:"file_type"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`

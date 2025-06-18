@@ -1,11 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/sohan-reza/capstone-core/internal/config"
 	"github.com/sohan-reza/capstone-core/internal/controller"
+	"github.com/sohan-reza/capstone-core/internal/model"
+	"github.com/sohan-reza/capstone-core/internal/repository"
+	"github.com/sohan-reza/capstone-core/internal/service"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -17,7 +23,25 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	log.Printf("Starting server on port %s", cfg.Server.Port)
+	awsService, err := service.NewAWSService(cfg.AWS.BucketName, cfg.AWS.Region, cfg.AWS.AccessKeyID, cfg.AWS.SecretAccessKey)
+	if err != nil {
+		log.Fatalf("Failed to initialize AWS service: %v", err)
+	}
+
+	// Initialize database and repository
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+		cfg.Database.Host, cfg.Database.User, cfg.Database.Password, cfg.Database.Name, cfg.Database.Port)
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// Auto migrate (for development)
+	if err := db.AutoMigrate(&model.File{}); err != nil {
+		log.Fatalf("Failed to migrate database: %v", err)
+	}
+
+	fileRepo := repository.NewFileRepository(db)
 
 	r := chi.NewRouter()
 
@@ -29,7 +53,7 @@ func main() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	uploadController := controller.NewUploadController(cfg)
+	uploadController := controller.NewUploadController(cfg, awsService, fileRepo)
 	r.Post("/upload", uploadController.HandleFileUpload)
 
 	s.ListenAndServe()

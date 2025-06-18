@@ -57,8 +57,7 @@ func (c *PDFController) HandleUpload(w http.ResponseWriter, r *http.Request, old
 	respondWithJSON(w, http.StatusOK, FileResponse{
 		Status:   "success",
 		Message:  "PDF processed successfully",
-		OldName:  oldFilename,
-		NewName:  newFilename,
+		FileName: oldFilename,
 		FileSize: header.Size,
 		FileType: filepath.Ext(oldFilename),
 		Metadata: map[string]interface{}{

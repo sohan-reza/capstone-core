@@ -20,8 +20,7 @@ func (c *ArchiveController) HandleUpload(w http.ResponseWriter, r *http.Request,
 	respondWithJSON(w, http.StatusOK, FileResponse{
 		Status:   "success",
 		Message:  "Archive processed successfully",
-		OldName:  oldFilename,
-		NewName:  newFilename,
+		FileName: oldFilename,
 		FileSize: header.Size,
 		FileType: filepath.Ext(oldFilename),
 	})
