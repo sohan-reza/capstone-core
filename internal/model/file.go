@@ -8,6 +8,8 @@ type File struct {
 	StorageKey   string    `json:"storage_key"`
 	DownloadURL  string    `json:"download_url"`
 	Size         int64     `json:"size"`
+	TeamID       string    `json:"team_id"`
+	FileType     string    `json:"file_type"`
 	ContentType  string    `json:"content_type"`
 	CreatedAt    time.Time `json:"created_at"`
 }

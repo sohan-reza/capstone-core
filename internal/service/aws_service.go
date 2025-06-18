@@ -1,8 +1,10 @@
 package service
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -18,6 +20,8 @@ import (
 type AWSService interface {
 	UploadFile(filePath string, fileName string, year string, intake string, teamID string) (string, string, error)
 	GeneratePresignedURL(key string) (string, error)
+	DeleteFile(key string) error
+	DownloadBucketAsZip(w io.Writer) error
 }
 
 type awsService struct {
@@ -124,4 +128,64 @@ func (s *awsService) GeneratePresignedURL(key string) (string, error) {
 	}
 
 	return req.URL, nil
+}
+
+func (s *awsService) DeleteFile(key string) error {
+	_, err := s.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete file: %v (bucket: %s, key: %s)",
+			err, s.bucketName, key)
+	}
+
+	// Wait until file is actually deleted (optional)
+	waiter := s3.NewObjectNotExistsWaiter(s.client)
+	return waiter.Wait(context.TODO(), &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(key),
+	}, 5*time.Minute) // Timeout after 5 minutes
+}
+
+func (s *awsService) DownloadBucketAsZip(w io.Writer) error {
+	// Create a zip writer that streams to the response
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
+
+	// List all objects in the bucket
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucketName),
+	})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.TODO())
+		if err != nil {
+			return fmt.Errorf("failed to list objects: %w", err)
+		}
+
+		for _, obj := range page.Contents {
+			// Create a zip entry for each file
+			entry, err := zipWriter.Create(*obj.Key)
+			if err != nil {
+				return fmt.Errorf("failed to create zip entry: %w", err)
+			}
+
+			// Stream file directly from S3 to zip
+			result, err := s.client.GetObject(context.TODO(), &s3.GetObjectInput{
+				Bucket: aws.String(s.bucketName),
+				Key:    obj.Key,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to get object %s: %w", *obj.Key, err)
+			}
+			defer result.Body.Close()
+
+			if _, err := io.Copy(entry, result.Body); err != nil {
+				return fmt.Errorf("failed to write to zip: %w", err)
+			}
+		}
+	}
+
+	return nil
 }

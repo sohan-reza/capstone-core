@@ -190,6 +190,8 @@ func (c *UploadController) HandleFileUpload(w http.ResponseWriter, r *http.Reque
 		StorageKey:   key,
 		DownloadURL:  downloadURL,
 		Size:         header.Size,
+		TeamID:       r.FormValue("team_id"),
+		FileType:     filepath.Ext(header.Filename)[1:],
 		ContentType:  header.Header.Get("Content-Type"),
 	}
 

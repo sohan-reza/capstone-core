@@ -1,6 +1,9 @@
 package repository
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/sohan-reza/capstone-core/internal/model"
 
 	"gorm.io/gorm"
@@ -9,6 +12,11 @@ import (
 type FileRepository interface {
 	Create(file *model.File) error
 	FindByID(id uint) (*model.File, error)
+	DeleteByKey(key string) error
+	GetFilesByTeamID(teamID string) ([]struct {
+		DownloadURL string `json:"download_url"`
+		FileType    string `json:"file_type"`
+	}, error)
 }
 
 type fileRepository struct {
@@ -29,7 +37,40 @@ func (r *fileRepository) FindByID(id uint) (*model.File, error) {
 	return &file, err
 }
 
-// In your repository
+func (r *fileRepository) DeleteByKey(key string) error {
+	if key == "" {
+		return errors.New("empty file key provided")
+	}
+
+	result := r.db.Where("storage_key = ?", key).Delete(&model.File{})
+	if result.Error != nil {
+		return fmt.Errorf("database deletion failed: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no record found with key: %s", key)
+	}
+
+	return nil
+}
+
+func (r *fileRepository) GetFilesByTeamID(teamID string) ([]struct {
+	DownloadURL string `json:"download_url"`
+	FileType    string `json:"file_type"`
+}, error) {
+	var results []struct {
+		DownloadURL string `json:"download_url"`
+		FileType    string `json:"file_type"`
+	}
+
+	err := r.db.Model(&model.File{}).
+		Where("team_id = ?", teamID).
+		Select("download_url, file_type").
+		Find(&results).Error
+
+	return results, err
+}
+
 // func (r *fileRepository) GetURLWithRefresh(id uint) (string, error) {
 // 	file, err := r.FindByID(id)
 // 	if err != nil {

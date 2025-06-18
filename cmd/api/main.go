@@ -54,7 +54,12 @@ func main() {
 	}
 
 	uploadController := controller.NewUploadController(cfg, awsService, fileRepo)
-	r.Post("/upload", uploadController.HandleFileUpload)
+	r.Route("/api/v1", func(v1 chi.Router) {
+		v1.Post("/upload", uploadController.HandleFileUpload)
+		v1.Delete("/files", uploadController.HandleDeleteFile)
+		v1.Get("/bucket/backup", uploadController.HandleDownloadBucket)
+		v1.Get("/download", uploadController.GetFilesByTeamID)
+	})
 
 	s.ListenAndServe()
 }
