@@ -105,6 +105,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -141,6 +142,84 @@ func NewUploadController(cfg *config.Config, awsService service.AWSService, file
 	}
 }
 
+// func (c *UploadController) HandleFileUpload(w http.ResponseWriter, r *http.Request) {
+// 	if r.Method != http.MethodPost {
+// 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+// 		return
+// 	}
+
+// 	err := r.ParseMultipartForm(100 << 20)
+// 	if err != nil {
+// 		http.Error(w, "File too large or invalid form", http.StatusBadRequest)
+// 		return
+// 	}
+
+// 	file, header, err := r.FormFile("file")
+// 	if err != nil {
+// 		http.Error(w, "Error retrieving file", http.StatusBadRequest)
+// 		return
+// 	}
+// 	defer file.Close()
+
+// 	newFilename := generateUniqueFilename(header.Filename)
+// 	filePath := filepath.Join(c.uploadDir, newFilename)
+
+// 	if err := saveUploadedFile(file, filePath); err != nil {
+// 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	defer os.Remove(filePath)
+
+// 	// Upload to AWS S3
+// 	key, originalName, err := c.awsService.UploadFile(filePath, header.Filename, strconv.Itoa(time.Now().Year()), r.FormValue("intake"), r.FormValue("team_id"))
+// 	if err != nil {
+// 		http.Error(w, "Failed to upload to cloud storage", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Generate presigned URL
+// 	downloadURL, err := c.awsService.GeneratePresignedURL(key)
+// 	if err != nil {
+// 		http.Error(w, "Failed to generate download link", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Save file metadata to database
+// 	fileRecord := &model.File{
+// 		OriginalName: originalName,
+// 		StorageKey:   key,
+// 		DownloadURL:  downloadURL,
+// 		Size:         header.Size,
+// 		TeamID:       r.FormValue("team_id"),
+// 		FileType:     filepath.Ext(header.Filename)[1:],
+// 		ContentType:  header.Header.Get("Content-Type"),
+// 	}
+
+// 	if err := c.fileRepo.Create(fileRecord); err != nil {
+// 		http.Error(w, "Failed to save file metadata", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Process the file based on its type
+// 	switch utils.DetectFileType(header) {
+// 	case utils.PDF:
+// 		c.pdfController.HandleUpload(w, r, header.Filename, newFilename, filePath)
+// 	case utils.Archive:
+// 		c.archiveController.HandleUpload(w, r, header.Filename, newFilename, filePath)
+// 	default:
+// 		w.Header().Set("Content-Type", "application/json")
+// 		w.WriteHeader(http.StatusUnsupportedMediaType)
+// 		json.NewEncoder(w).Encode(map[string]interface{}{
+// 			"status":  false,
+// 			"message": "Unsupported file type",
+// 		})
+// 		return
+// 	}
+
+//		// Include the download URL in the response if needed
+//		// You can modify your PDF/Archive controller responses to include this
+//	}
 func (c *UploadController) HandleFileUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -160,27 +239,67 @@ func (c *UploadController) HandleFileUpload(w http.ResponseWriter, r *http.Reque
 	}
 	defer file.Close()
 
+	// Create temporary file for validation
 	newFilename := generateUniqueFilename(header.Filename)
 	filePath := filepath.Join(c.uploadDir, newFilename)
 
 	if err := saveUploadedFile(file, filePath); err != nil {
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		http.Error(w, "Failed to save temporary file", http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(filePath) // Ensure cleanup
+
+	recorder := httptest.NewRecorder()
+
+	switch utils.DetectFileType(header) {
+	case utils.PDF:
+		c.pdfController.HandleUpload(recorder, r, header.Filename, newFilename, filePath)
+	case utils.Archive:
+		c.archiveController.HandleUpload(recorder, r, header.Filename, newFilename, filePath)
+	default:
+		respondWithJSON(w, http.StatusUnsupportedMediaType, map[string]interface{}{
+			"status":  "error",
+			"message": "Unsupported file type",
+		})
 		return
 	}
 
-	defer os.Remove(filePath)
+	if recorder.Code != http.StatusOK {
+		// Forward the error response from the handler
+		for k, v := range recorder.Header() {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(recorder.Code)
+		w.Write(recorder.Body.Bytes())
+		return
+	}
 
-	// Upload to AWS S3
+	var fileResp FileResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &fileResp); err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to parse handler response",
+		})
+		return
+	}
+
+	// Only upload to AWS after successful validation
 	key, originalName, err := c.awsService.UploadFile(filePath, header.Filename, strconv.Itoa(time.Now().Year()), r.FormValue("intake"), r.FormValue("team_id"))
 	if err != nil {
-		http.Error(w, "Failed to upload to cloud storage", http.StatusInternalServerError)
+		respondWithJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to upload to cloud storage",
+		})
 		return
 	}
 
 	// Generate presigned URL
 	downloadURL, err := c.awsService.GeneratePresignedURL(key)
 	if err != nil {
-		http.Error(w, "Failed to generate download link", http.StatusInternalServerError)
+		respondWithJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to generate download link",
+		})
 		return
 	}
 
@@ -196,29 +315,29 @@ func (c *UploadController) HandleFileUpload(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := c.fileRepo.Create(fileRecord); err != nil {
-		http.Error(w, "Failed to save file metadata", http.StatusInternalServerError)
-		return
-	}
-
-	// Process the file based on its type
-	switch utils.DetectFileType(header) {
-	case utils.PDF:
-		c.pdfController.HandleUpload(w, r, header.Filename, newFilename, filePath)
-	case utils.Archive:
-		c.archiveController.HandleUpload(w, r, header.Filename, newFilename, filePath)
-	default:
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  false,
-			"message": "Unsupported file type",
+		respondWithJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to save file metadata",
 		})
 		return
 	}
 
-	// Include the download URL in the response if needed
-	// You can modify your PDF/Archive controller responses to include this
+	// Return success response with handler data and upload info
+	response := map[string]interface{}{
+		"status":      "success",
+		"message":     "File successfully processed and uploaded",
+		"fileInfo":    fileResp,
+		"downloadURL": downloadURL,
+	}
+
+	respondWithJSON(w, http.StatusOK, response)
 }
+
+// func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+// 	w.Header().Set("Content-Type", "application/json")
+// 	w.WriteHeader(code)
+// 	json.NewEncoder(w).Encode(payload)
+// }
 
 func generateUniqueFilename(original string) string {
 	ext := filepath.Ext(original)
