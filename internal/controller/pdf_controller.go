@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func (c *PDFController) HandleUpload(w http.ResponseWriter, r *http.Request, old
 	}
 	defer file.Close()
 
-	isValid, plagiarismPercent, err := true, 0, nil //c.checkPlagiarism(filePath)
+	isValid, plagiarismPercent, err := c.checkPlagiarism(filePath)
 	if err != nil {
 		os.Remove(filePath)
 		respondWithError(w, http.StatusServiceUnavailable, "Plagiarism service unavailable", err)
@@ -45,7 +46,7 @@ func (c *PDFController) HandleUpload(w http.ResponseWriter, r *http.Request, old
 			"status": "error",
 			"error":  "Plagiarism check failed",
 			"details": map[string]interface{}{
-				"message":   "n% or less plagiarism is accepted",
+				"message":   fmt.Sprintf("%d%% or less plagiarism is accepted", c.threshold),
 				"type":      "plagiarism",
 				"detected":  plagiarismPercent,
 				"threshold": c.threshold,
@@ -73,7 +74,7 @@ func (c *PDFController) checkPlagiarism(filePath string) (bool, float64, error) 
 		SetResult(&struct {
 			Percentage float64 `json:"matchPercent"`
 		}{}).
-		Post(c.plagiarismAPI + "/api/check/plagiarism")
+		Post(c.plagiarismAPI)
 
 	if err != nil {
 		return false, 0, err
