@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 )
 
 func main() {
@@ -45,6 +46,15 @@ func main() {
 
 	r := chi.NewRouter()
 
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"https://*", "http://*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
+
 	s := &http.Server{
 		Addr:           ":" + cfg.Server.Port,
 		Handler:        r,
@@ -61,5 +71,8 @@ func main() {
 		v1.Get("/download", uploadController.GetFilesByTeamID)
 	})
 
-	s.ListenAndServe()
+	log.Printf("Server starting on port %s", cfg.Server.Port)
+	if err := s.ListenAndServe(); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
